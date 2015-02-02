@@ -166,7 +166,7 @@ static NSUInteger const kPNResponseTimeTokenElementIndexForEvent = 1;
                 PNChannel* (^channelExtractBlock)(NSString *) = ^(NSString *channelName) {
                     
                     // Retrieve reference on channel on which event is occurred
-                    PNChannel *channel = [PNChannel channelWithName:channelName];
+                    PNChannel *channel = [PNChannel channelWithName:channelName shouldObservePresence:NO];
                     
                     // Checking whether event occurred on presence observing channel or no and retrieve reference on
                     // original channel
