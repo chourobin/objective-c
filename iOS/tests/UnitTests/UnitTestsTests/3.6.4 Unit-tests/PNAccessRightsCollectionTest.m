@@ -56,28 +56,37 @@
 	XCTAssertTrue( info.level == PNApplicationAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == PNUnknownAccessRights, @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == nil, @"");
+	XCTAssertTrue( info.object == nil, @"");
 	XCTAssertTrue( info.authorizationKey == nil, @"");
 	XCTAssertTrue( info.accessPeriodDuration == 0, @"");
 }
 
 -(void)testAccessRightsInformationForAllChannels {
-	PNAccessRightsCollection *collection = [PNAccessRightsCollection accessRightsCollectionForApplication: @"key" andAccessRightsLevel: PNApplicationAccessRightsLevel];
-	[collection.channelsAccessRightsInformation setObject: @"obj" forKey: @"key"];
-	NSArray *arr = [collection accessRightsInformationForAllChannels];
-
-	XCTAssertTrue( [arr isEqualToArray: [collection.channelsAccessRightsInformation allValues]], @"");
+	PNAccessRightsCollection *collection = [PNAccessRightsCollection accessRightsCollectionForApplication: @"key" andAccessRightsLevel:PNApplicationAccessRightsLevel];
+    
+    PNAccessRightsInformation *accessRightsInformation = [PNAccessRightsInformation accessRightsInformationForLevel:PNChannelAccessRightsLevel
+                                                                                          rights:PNAllAccessRights                                                                                  applicationKey:@"key"
+                                                                                      forChannel:[PNChannel channelWithName: @"channel"]
+                                                                                          client:@"client"
+                                                                                    accessPeriod: 123];
+    XCTAssertTrue( accessRightsInformation.object == [PNChannel channelWithName: @"channel"], @"");
+    XCTAssertFalse( accessRightsInformation.object.isChannelGroup);
+    
+    [collection.channelsAccessRightsInformation setObject:accessRightsInformation forKey:@"key"];
+    
+	NSArray *informationForAllChannels = [collection accessRightsInformationForAllChannels];
+	XCTAssertTrue( [informationForAllChannels isEqualToArray: [collection.channelsAccessRightsInformation allValues]], @"");
 }
 
 -(void)testAccessRightsInformationForChannel {
 	PNAccessRightsCollection *collection = [PNAccessRightsCollection accessRightsCollectionForApplication: @"key" andAccessRightsLevel: PNApplicationAccessRightsLevel];
 	PNChannel *channel = [PNChannel channelWithName: @"channel"];
 
-	PNAccessRightsInformation *info = [collection accessRightsInformationForChannel: channel];
+	PNAccessRightsInformation *info = [collection accessRightsInformationFor:channel];
 	XCTAssertTrue( info.level == PNChannelAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == PNUnknownAccessRights, @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == channel, @"");
+	XCTAssertTrue( info.object == channel, @"");
 	XCTAssertTrue( info.authorizationKey == nil, @"");
 	XCTAssertTrue( info.accessPeriodDuration == 0, @"");
 
@@ -85,39 +94,44 @@
 	info = [PNAccessRightsInformation accessRightsInformationForLevel: PNChannelAccessRightsLevel rights: PNReadAccessRight | PNWriteAccessRight applicationKey: @"key" forChannel: channel client: @"client" accessPeriod: 123];
 	[collection storeChannelAccessRightsInformation: info];
 
-	info = [collection accessRightsInformationForChannel: channel];
+	info = [collection accessRightsInformationFor:channel];
 	XCTAssertTrue( info.level == PNChannelAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == (PNReadAccessRight | PNWriteAccessRight), @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == channel, @"");
+	XCTAssertTrue( info.object == channel, @"");
 	XCTAssertTrue( [info.authorizationKey isEqualToString: @"client"], @"");
 	XCTAssertTrue( info.accessPeriodDuration == 123, @"");
 }
 
 -(void)testAccessRightsForClientsOnChannel {
 	PNAccessRightsCollection *collection = [PNAccessRightsCollection accessRightsCollectionForApplication: @"key" andAccessRightsLevel: PNApplicationAccessRightsLevel];
+    
 	PNChannel *channel = [PNChannel channelWithName: @"channel"];
 
-	XCTAssertTrue( [[collection accessRightsForClientsOnChannel: channel] count] == 0, @"");
+	XCTAssertTrue( [[collection accessRightsForClientsOn: channel] count] == 0, @"");
 
 	PNAccessRightsInformation *info = [PNAccessRightsInformation accessRightsInformationForLevel: PNChannelAccessRightsLevel rights: PNReadAccessRight | PNWriteAccessRight applicationKey: @"key" forChannel: channel client: @"client" accessPeriod: 123];
+    
 	[collection storeClientAccessRightsInformation: info forChannel: channel];
-	NSArray *arr = [collection accessRightsForClientsOnChannel: channel];
-	XCTAssertTrue( [[collection accessRightsForClientsOnChannel: channel] count] == 1, @"");
+	NSArray *arr = [collection accessRightsForClientsOn: channel];
+	XCTAssertTrue( [[collection accessRightsForClientsOn: channel] count] == 1, @"");
 	info = arr[0];
 	XCTAssertTrue( info.level == PNChannelAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == (PNReadAccessRight | PNWriteAccessRight), @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == channel, @"");
+	XCTAssertTrue( info.object == channel, @"");
 	XCTAssertTrue( [info.authorizationKey isEqualToString: @"client"], @"");
 	XCTAssertTrue( info.accessPeriodDuration == 123, @"");
 }
 
 -(void)testAccessRightsInformationForAllClientAuthorizationKeys {
 	PNAccessRightsCollection *collection = [PNAccessRightsCollection accessRightsCollectionForApplication: @"key" andAccessRightsLevel: PNApplicationAccessRightsLevel];
+    
 	PNChannel *channel = [PNChannel channelWithName: @"channel"];
+    
 	PNAccessRightsInformation *info = [PNAccessRightsInformation accessRightsInformationForLevel: PNChannelAccessRightsLevel rights: PNReadAccessRight | PNWriteAccessRight applicationKey: @"key" forChannel: channel client: @"client" accessPeriod: 123];
-	[collection storeClientAccessRightsInformation: info forChannel: channel];
+    
+	[collection storeClientAccessRightsInformation:info forChannel:channel];
 
 	NSArray *arr = [collection accessRightsInformationForAllClientAuthorizationKeys];
 	XCTAssertTrue( [arr count] == 1, @"");
@@ -147,7 +161,7 @@
 	XCTAssertTrue( info.level == PNUserAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == PNUnknownAccessRights, @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == channel, @"");
+	XCTAssertTrue( info.object == channel, @"");
 	XCTAssertTrue( [info.authorizationKey isEqualToString: @"key"] == TRUE, @"");
 	XCTAssertTrue( info.accessPeriodDuration == 0, @"");
 
@@ -157,7 +171,7 @@
 	XCTAssertTrue( info.level == PNUserAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == (PNReadAccessRight | PNWriteAccessRight), @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == channel, @"");
+	XCTAssertTrue( info.object == channel, @"");
 	XCTAssertTrue( [info.authorizationKey isEqualToString: @"key"], @"");
 }
 
@@ -174,13 +188,13 @@
 	PNAccessRightsInformation *info = [PNAccessRightsInformation accessRightsInformationForLevel: PNUserAccessRightsLevel rights: PNReadAccessRight | PNWriteAccessRight applicationKey: @"key" forChannel: channel client: @"client" accessPeriod: 123];
 
 	[collection storeClientAccessRightsInformation: info forChannel: channel];
-	NSArray *arr = [collection accessRightsForClientsOnChannel: channel];
+	NSArray *arr = [collection accessRightsForClientsOn: channel];
 	XCTAssertTrue( [arr count] == 1, @"");
 	info = arr[0];
 	XCTAssertTrue( info.level == PNUserAccessRightsLevel, @"");
 	XCTAssertTrue( info.rights == (PNReadAccessRight | PNWriteAccessRight), @"");
 	XCTAssertTrue( [info.subscriptionKey isEqualToString: @"key"] == TRUE, @"");
-	XCTAssertTrue( info.channel == channel, @"");
+	XCTAssertTrue( info.object == channel, @"");
 	XCTAssertTrue( [info.authorizationKey isEqualToString: @"client"], @"");
 	XCTAssertTrue( info.accessPeriodDuration == 123, @"");
 }

@@ -16,7 +16,7 @@
 #import "PNWriteBuffer.h"
 #import "PNConstants.h"
 
-static const NSUInteger kAmountOfChannels = 20;
+static const NSUInteger kAmountOfChannels = 15;
 
 @interface ChangingChannels : XCTestCase <PNDelegate>
 
@@ -48,7 +48,7 @@ static const NSUInteger kAmountOfChannels = 20;
     
     [resGroup enter];
     
-    PNConfiguration *configuration = [PNConfiguration configurationForOrigin:@"pubsub.pubnub.com" publishKey:@"demo" subscribeKey:@"demo" secretKey: nil cipherKey: nil];
+    PNConfiguration *configuration = [PNConfiguration defaultConfiguration];
     [PubNub setConfiguration:configuration];
 
     [PubNub connectWithSuccessBlock:^(NSString *origin) {
@@ -59,7 +59,7 @@ static const NSUInteger kAmountOfChannels = 20;
                              [resGroup leave];
                          }];
     
-    if ([GCDWrapper isGCDGroup:resGroup timeoutFiredValue:20]) {
+    if ([GCDWrapper isGCDGroup:resGroup timeoutFiredValue:10]) {
         XCTFail(@"Timeout to connect to PubNub service");
         return;
     }
@@ -74,9 +74,7 @@ static const NSUInteger kAmountOfChannels = 20;
     
 	for(int i = 0; i < amountOfChannels; i++) {
         
-		NSString *channelName = [NSString stringWithFormat: @"%@ %d", [NSDate date], i];
-        channelName = [channelName stringByReplacingOccurrencesOfString:@":" withString:@"-"];
-        
+		NSString *channelName = [NSString stringWithFormat: @"channel%d", i];
         [channelNames addObject:channelName];
         
 		NSArray *channels = [PNChannel channelsWithNames:@[channelName]];
@@ -114,7 +112,6 @@ static const NSUInteger kAmountOfChannels = 20;
             [_resGroup leave];
         }
     }];
-        
     }
     
     if ([GCDWrapper isGCDGroup:_resGroup timeoutFiredValue:30]) {

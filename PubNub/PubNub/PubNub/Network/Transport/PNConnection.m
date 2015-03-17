@@ -18,6 +18,7 @@
 #import "PNConnection+Protected.h"
 #import "PNResponseDeserialize.h"
 #import "NSObject+PNAdditions.h"
+#import "PNContextInformation.h"
 #import "PNLogger+Protected.h"
 #import "PNResponseProtocol.h"
 #import "PubNub+Protected.h"
@@ -422,6 +423,7 @@ static NSUInteger const kPNMaximumConnectionRetryCount = 3;
  */
 - (void)startTimeoutTimer;
 - (void)stopTimeoutTimer;
+- (void)stopTimeoutTimer:(BOOL)forRelaunch;
 
 /**
  * Construct/reuse and launch/resume/suspend/stop 'wakeup' timer to help restore connection if it will be required
@@ -586,9 +588,9 @@ static NSUInteger const kPNMaximumConnectionRetryCount = 3;
 
 void readStreamCallback(CFReadStreamRef stream, CFStreamEventType type, void *clientCallBackInfo) {
 
-    NSCAssert([(__bridge id)clientCallBackInfo isKindOfClass:[PNConnection class]],
+    NSCAssert([(__bridge id)clientCallBackInfo isKindOfClass:[PNContextInformation class]],
               @"{ERROR}[READ] WRONG CLIENT INSTANCE HAS BEEN SENT AS CLIENT");
-    PNConnection *connection = (__bridge PNConnection *)clientCallBackInfo;
+    PNConnection *connection = ((__bridge PNContextInformation *)clientCallBackInfo).object;
 
     NSString *status = [connection stringifyStreamStatus:CFReadStreamGetStatus(stream)];
 
@@ -679,9 +681,9 @@ void readStreamCallback(CFReadStreamRef stream, CFStreamEventType type, void *cl
 
 void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *clientCallBackInfo) {
 
-    NSCAssert([(__bridge id)clientCallBackInfo isKindOfClass:[PNConnection class]],
-              @"{ERROR}[WRITE] WRONG CLIENT INSTANCE HAS BEEN SENT AS CLIENT");
-    PNConnection *connection = (__bridge PNConnection *)clientCallBackInfo;
+    NSCAssert([(__bridge id)clientCallBackInfo isKindOfClass:[PNContextInformation class]],
+              @"{ERROR}[READ] WRONG CLIENT INSTANCE HAS BEEN SENT AS CLIENT");
+    PNConnection *connection = ((__bridge PNContextInformation *)clientCallBackInfo).object;
 
     NSString *status = [connection stringifyStreamStatus:CFWriteStreamGetStatus(stream)];
     
@@ -768,6 +770,11 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
                 break;
         }
     }];
+}
+
+void connectionContextInformationReleaseCallBack( void *info ) {
+    
+    CFRelease(info);
 }
 
 
@@ -3763,17 +3770,17 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
     // This method should be launched only from within it's private queue
     [self pn_scheduleOnPrivateQueueAssert];
 
-    [self stopTimeoutTimer];
+    [self stopTimeoutTimer:YES];
 
-    if (self.connectionTimeoutTimer == NULL) {
+    if (self.connectionTimeoutTimer == NULL || dispatch_source_testcancel(self.connectionTimeoutTimer) > 0) {
 
         dispatch_source_t timerSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                [self pn_privateQueue]);
+                                                               [self pn_privateQueue]);
         [PNDispatchHelper retain:timerSource];
         self.connectionTimeoutTimer = timerSource;
 
         __pn_desired_weak __typeof__(self) weakSelf = self;
-        dispatch_source_set_event_handler(self.connectionTimeoutTimer, ^{
+        dispatch_source_set_event_handler(timerSource, ^{
             
             __strong __typeof__(self) strongSelf = weakSelf;
 
@@ -3786,28 +3793,35 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
             [strongSelf stopTimeoutTimer];
             [strongSelf handleStreamTimeout];
         });
-        dispatch_source_set_cancel_handler(self.connectionTimeoutTimer, ^{
-            
-            __strong __typeof__(self) strongSelf = weakSelf;
+        dispatch_source_set_cancel_handler(timerSource, ^{
 
             [PNDispatchHelper release:timerSource];
-            strongSelf.connectionTimeoutTimer = NULL;
         });
 
         dispatch_time_t start = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPNConnectionTimeout * NSEC_PER_SEC));
-        dispatch_source_set_timer(self.connectionTimeoutTimer, start, (int64_t)(kPNConnectionTimeout * NSEC_PER_SEC), NSEC_PER_SEC);
-        dispatch_resume(self.connectionTimeoutTimer);
+        dispatch_source_set_timer(timerSource, start, (int64_t)(kPNConnectionTimeout * NSEC_PER_SEC), NSEC_PER_SEC);
+        dispatch_resume(timerSource);
     }
 }
 
 - (void)stopTimeoutTimer {
+    
+    [self stopTimeoutTimer:NO];
+}
 
+- (void)stopTimeoutTimer:(BOOL)forRelaunch {
+    
     // This method should be launched only from within it's private queue
     [self pn_scheduleOnPrivateQueueAssert];
-
-    if (self.connectionTimeoutTimer != NULL) {
-
+    
+    if (self.connectionTimeoutTimer != NULL && dispatch_source_testcancel(self.connectionTimeoutTimer) == 0) {
+        
         dispatch_source_cancel(self.connectionTimeoutTimer);
+    }
+    
+    if (!forRelaunch) {
+        
+        self.connectionTimeoutTimer = NULL;
     }
 }
 
@@ -3816,7 +3830,7 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
     // This method should be launched only from within it's private queue
     [self pn_scheduleOnPrivateQueueAssert];
 
-    if (self.wakeUpTimer == NULL) {
+    if (self.wakeUpTimer == NULL || dispatch_source_testcancel(self.wakeUpTimer) > 0) {
 
         self.wakeUpTimerSuspended = YES;
 
@@ -3824,21 +3838,21 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
                                                                [self pn_privateQueue]);
         [PNDispatchHelper retain:timerSource];
         self.wakeUpTimer = timerSource;
+        
         __pn_desired_weak __typeof__(self) weakSelf = self;
-        dispatch_source_set_event_handler(self.wakeUpTimer, ^{
+        dispatch_source_set_event_handler(timerSource, ^{
             
             __strong __typeof__(self) strongSelf = weakSelf;
 
             [strongSelf handleWakeUpTimer];
         });
-        dispatch_source_set_cancel_handler(self.wakeUpTimer, ^{
+        dispatch_source_set_cancel_handler(timerSource, ^{
             
             __strong __typeof__(self) strongSelf = weakSelf;
 
             [PNDispatchHelper release:timerSource];
 
             strongSelf.wakeUpTimerSuspended = NO;
-            strongSelf.wakeUpTimer = NULL;
         });
 
         [self resetWakeUpTimer];
@@ -3855,7 +3869,7 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
     // This method should be launched only from within it's private queue
     [self pn_scheduleOnPrivateQueueAssert];
 
-    if (self.wakeUpTimer != NULL) {
+    if (self.wakeUpTimer != NULL && dispatch_source_testcancel(self.wakeUpTimer) == 0) {
 
         if (!self.isWakeUpTimerSuspended) {
 
@@ -3874,7 +3888,7 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
     // This method should be launched only from within it's private queue
     [self pn_scheduleOnPrivateQueueAssert];
 
-    if (self.wakeUpTimer == NULL) {
+    if (self.wakeUpTimer == NULL || dispatch_source_testcancel(self.wakeUpTimer) > 0) {
 
         [self startWakeUpTimer];
     }
@@ -3890,14 +3904,14 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
 }
 
 - (void)stopWakeUpTimer {
-
+    
     // This method should be launched only from within it's private queue
     [self pn_scheduleOnPrivateQueueAssert];
-
-    if (self.wakeUpTimer != NULL) {
-
+    
+    if (self.wakeUpTimer != NULL && dispatch_source_testcancel(self.wakeUpTimer) == 0) {
+        
         if (self.isWakeUpTimerSuspended) {
-
+            
             [self resumeWakeUpTimer];
         }
         self.wakeUpTimerSuspended = NO;
@@ -3913,7 +3927,11 @@ void writeStreamCallback(CFWriteStreamRef stream, CFStreamEventType type, void *
 
 - (CFStreamClientContext)streamClientContext {
 
-    return (CFStreamClientContext){0, (__bridge void *)(self), NULL, NULL, NULL};
+    PNContextInformation *information = [PNContextInformation contextWithObject:self];
+    
+    
+    return (CFStreamClientContext){0, (__bridge_retained void *)information, NULL,
+                                   connectionContextInformationReleaseCallBack, NULL};
 }
 
 - (CFMutableDictionaryRef)streamSecuritySettings {

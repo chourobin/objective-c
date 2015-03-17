@@ -20,6 +20,7 @@
 #import "PNResponse.h"
 #import "PNHelper.h"
 #import "PNError.h"
+#import "PNTimer.h"
 
 #import "PNLoggerSymbols.h"
 
@@ -125,10 +126,10 @@ struct PNRequestForRescheduleStructure PNRequestForReschedule = {
 @property (nonatomic, strong) PNConnection *connection;
 
 /**
- Timer used to track requests execution time and report timeout if execution time (till response arrive) exceeded
- allowed time frame
+ @brief Timer used to track requests execution time and report timeout if execution time (till
+        response arrive) exceeded allowed time frame
  */
-@property (nonatomic, pn_dispatch_property_ownership) dispatch_source_t timeoutTimer;
+@property (nonatomic, strong) PNTimer *timeoutTimer;
 
 /**
  Current connection channel state
@@ -269,6 +270,8 @@ struct PNRequestForRescheduleStructure PNRequestForReschedule = {
 
         [self pn_setupPrivateSerialQueueWithIdentifier:@"connection-channel"
                                            andPriority:DISPATCH_QUEUE_PRIORITY_DEFAULT];
+
+        self.timeoutTimer = [PNTimer timerWithTick:0.5f onQueue:[self pn_privateQueue]];
 
         // Initialize connection to the PubNub services
         self.requestsQueue = [PNRequestsQueue new];
@@ -1264,65 +1267,40 @@ struct PNRequestForRescheduleStructure PNRequestForReschedule = {
 
     [self pn_dispatchBlock:^{
 
-        [self stopTimeoutTimerForRequest:nil];
-
         // Stop timeout timer only for requests which is scheduled from the name of user
         if ((request.isSendingByUserRequest && [self isWaitingRequestCompletion:request.shortIdentifier]) ||
             request == nil) {
 
-            if (self.timeoutTimer == NULL) {
+            __pn_desired_weak __typeof__(self) weakSelf = self;
+            [self.timeoutTimer schedule:^{
 
-                NSTimeInterval interval = request ? [request timeout] : self.configuration.subscriptionRequestTimeout;
-                dispatch_source_t timerSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                        [self pn_privateQueue]);
-                [PNDispatchHelper retain:timerSource];
-                self.timeoutTimer = timerSource;
+                __strong __typeof__(self) strongSelf = weakSelf;
+                [PNLogger logConnectionInfoMessageFrom:strongSelf
+                               withParametersFromBlock:^NSArray * {
 
-                __pn_desired_weak __typeof__(self) weakSelf = self;
-                dispatch_source_set_event_handler(self.timeoutTimer, ^{
-                    
-                    __strong __typeof__(self) strongSelf = weakSelf;
-
-                    [PNLogger logConnectionInfoMessageFrom:self withParametersFromBlock:^NSArray * {
-
-                        return @[PNLoggerSymbols.connection.handleTimeoutTimer,
-                                 (strongSelf.name ? strongSelf.name : strongSelf),
-                                @(strongSelf.state)];
-                    }];
-
-                    [strongSelf stopTimeoutTimerForRequest:nil];
-                    [strongSelf handleTimeoutTimer:request];
-                });
-                dispatch_source_set_cancel_handler(self.timeoutTimer, ^{
-                    
-                    __strong __typeof__(self) strongSelf = weakSelf;
-
-                    [PNDispatchHelper release:timerSource];
-                    strongSelf.timeoutTimer = NULL;
-                });
-
-                dispatch_time_t start = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(interval * NSEC_PER_SEC));
-                dispatch_source_set_timer(self.timeoutTimer, start, (uint64_t)(interval * NSEC_PER_SEC), NSEC_PER_SEC);
-                dispatch_resume(self.timeoutTimer);
+                    return @[PNLoggerSymbols.connection.handleTimeoutTimer,
+                             (strongSelf.name ? strongSelf.name : strongSelf),
+                             @(strongSelf.state)];
+                }];
+                [strongSelf handleTimeoutTimer:request];
             }
+                         withIdentifier:request.shortIdentifier toFireAfter:request.timeout];
+
+            [self.timeoutTimer start];
         }
     }];
 }
 
 - (void)stopTimeoutTimerForRequest:(PNBaseRequest *)request {
 
-    [self pn_dispatchBlock:^{
+    if (request.shortIdentifier) {
 
-        // Stop timeout timer only for requests which is scheduled from the name of user
-        if ((request.isSendingByUserRequest && [self isWaitingRequestCompletion:request.shortIdentifier]) ||
-            request == nil) {
+        [self.timeoutTimer unscheduleBlockWithIdentifier:request.shortIdentifier];
+    }
+    else {
 
-            if (self.timeoutTimer != NULL) {
-
-                dispatch_source_cancel(self.timeoutTimer);
-            }
-        }
-    }];
+        [self.timeoutTimer stop];
+    }
 }
 
 
@@ -2128,6 +2106,11 @@ struct PNRequestForRescheduleStructure PNRequestForReschedule = {
 
             [self startTimeoutTimerForRequest:request];
         }
+
+        if (request.isSendingByUserRequest) {
+            [self.delegate connectionChannel:self didSendRequest:request];
+        }
+
         if (notifyCompletionBlock) {
 
             notifyCompletionBlock();

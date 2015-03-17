@@ -33,7 +33,7 @@
     dispatch_group_enter(_gcdGroup);
 }
 
-- (void)enterTimes:(int)times {
+- (void)enterTimes:(NSUInteger)times {
     _enterCount += times;
     
     for (int i = 0; i < times; i++) {
@@ -42,6 +42,8 @@
 }
 
 - (void)leave {
+    
+    NSAssert(_enterCount != 0, @"We try to leave group with zero enter count.");
     OSAtomicDecrement32(&(_enterCount));
     dispatch_group_leave(_gcdGroup);
 }
